@@ -176,9 +176,13 @@ class Handler(BaseHTTPRequestHandler):
             return bad(self, "unauthorised", 401)
         try:
             n = int(self.headers.get("content-length", "0"))
+            if n > 65536:
+                return bad(self, "body too large", 413)
             payload = json.loads(self.rfile.read(n) or b"{}")
         except ValueError:
-            return bad(self, "invalid json")
+            return bad(self, "invalid json body")
+        if not isinstance(payload, dict):
+            return bad(self, "body must be a json object")
         text = (payload.get("text") or "").strip()
         if not text:
             return bad(self, "text is required")
@@ -187,10 +191,14 @@ class Handler(BaseHTTPRequestHandler):
         thread = payload.get("thread")
         if thread and not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", str(thread)):
             return bad(self, "invalid thread id")
+        try:
+            wait = min(int(payload.get("wait") or DEFAULT_WAIT), MAX_WAIT)
+        except (TypeError, ValueError):
+            wait = DEFAULT_WAIT
         job_id = uuid.uuid4().hex[:12]
         job = {"id": job_id, "state": "queued", "text": text,
                "thread": str(thread) if thread else None,
-               "wait": min(int(payload.get("wait") or DEFAULT_WAIT), MAX_WAIT),
+               "wait": wait,
                "created": time.time()}
         with lock:
             jobs[job_id] = job
